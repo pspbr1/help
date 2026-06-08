@@ -64,9 +64,28 @@ fi
 # SSH
 #########################################
 
+echo "[INFO] Configurando SSH..."
+
+if ! dpkg -s openssh-server >/dev/null 2>&1; then
+    echo "[INFO] Instalando OpenSSH Server..."
+    apt update
+    apt install -y openssh-server
+fi
+
+SSHD_BIN="$(command -v sshd || true)"
+
+if [ -z "$SSHD_BIN" ]; then
+    if [ -x /usr/sbin/sshd ]; then
+        SSHD_BIN="/usr/sbin/sshd"
+    else
+        echo "[ERRO] sshd não encontrado."
+        exit 1
+    fi
+fi
+
 mkdir -p /etc/ssh/sshd_config.d
 
-cat >/etc/ssh/sshd_config.d/hardening.conf <<EOF
+cat > /etc/ssh/sshd_config.d/99-hardening.conf <<EOF
 Port ${SSH_PORT}
 PermitRootLogin no
 PasswordAuthentication yes
@@ -76,9 +95,32 @@ LoginGraceTime 30
 X11Forwarding no
 EOF
 
-sshd -t
+echo "[INFO] Validando configuração SSH..."
 
-systemctl restart ssh
+if ! "$SSHD_BIN" -t; then
+    echo "[ERRO] Configuração SSH inválida."
+
+    rm -f /etc/ssh/sshd_config.d/99-hardening.conf
+
+    echo "[INFO] Arquivo removido."
+
+    exit 1
+fi
+
+echo "[INFO] Reiniciando SSH..."
+
+if systemctl list-unit-files | grep -q '^ssh.service'; then
+    systemctl restart ssh
+    systemctl enable ssh
+elif systemctl list-unit-files | grep -q '^sshd.service'; then
+    systemctl restart sshd
+    systemctl enable sshd
+else
+    echo "[ERRO] Serviço SSH não encontrado."
+    exit 1
+fi
+
+echo "[OK] SSH configurado."
 
 #########################################
 # FAIL2BAN
